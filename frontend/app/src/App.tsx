@@ -94,7 +94,7 @@ function App({ signOut, user }: AppProps) {
       <TopNavigation
         identity={{
           href: '#',
-          title: 'Call Center Training Agent',
+          title: 'AI-Assisted Call Center Agent Training',
         }}
         utilities={[
           ...(role === 'admin' ? [

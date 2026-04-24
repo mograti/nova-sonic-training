@@ -54,7 +54,7 @@ function App() {
           <TopNavigation
             identity={{
               href: '#',
-              title: 'Call Center Training - Admin',
+              title: 'AI-Assisted Call Center Agent Training - Admin',
             }}
             utilities={[
               {

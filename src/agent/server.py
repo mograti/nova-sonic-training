@@ -83,6 +83,15 @@ async def health_check():
     return JSONResponse({"status": "healthy", "service": "call-center-training-agent"})
 
 
+@app.get("/ping")
+async def ping():
+    """AgentCore Runtime health probe (see HTTP protocol contract)."""
+    return JSONResponse({
+        "status": "Healthy",
+        "time_of_last_update": int(datetime.now().timestamp()),
+    })
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """
@@ -232,11 +241,12 @@ async def websocket_endpoint(websocket: WebSocket):
                             )
                             logger.info(f"Recorded transcript: {speaker} - {text[:50]}...")
 
-                    # Capture token usage from bidi_usage events
+                    # Capture token usage from bidi_usage events.
+                    # BidiAgent emits cumulative totals, so overwrite rather than sum.
                     if event_type == "bidi_usage":
-                        nova_sonic_usage["input_tokens"] += event.get("inputTokens", 0)
-                        nova_sonic_usage["output_tokens"] += event.get("outputTokens", 0)
-                        nova_sonic_usage["total_tokens"] += event.get("totalTokens", 0)
+                        nova_sonic_usage["input_tokens"] = event.get("inputTokens", nova_sonic_usage["input_tokens"])
+                        nova_sonic_usage["output_tokens"] = event.get("outputTokens", nova_sonic_usage["output_tokens"])
+                        nova_sonic_usage["total_tokens"] = event.get("totalTokens", nova_sonic_usage["total_tokens"])
 
                     # Forward event to WebSocket client
                     await websocket.send_json(event)

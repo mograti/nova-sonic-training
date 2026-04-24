@@ -600,7 +600,7 @@ This section presents an estimation of the AWS infrastructure costs to run this 
 
 - **Training volume:** 100 agents, 20 training sessions per agent per month = 2,000 sessions/month
 - **Average session duration:** ~95 seconds of bidirectional audio
-- **Nova Sonic tokens per session:** ~195,069 input + ~58,382 output (measured from full training session)
+- **Nova Sonic tokens per session:** ~2,353 input + ~1,169 output (measured from full training session)
 - **Claude Sonnet scoring tokens per evaluation:** ~3,976 input + ~3,409 output (measured)
 - **Claude Sonnet screen analysis tokens per session:** ~12,226 input + ~920 output (10 screenshots over 100s)
 - **AgentCore Runtime per session:** ~0.026 vCPU-hours + ~3.15 GB-hours (measured across 10 sessions)
@@ -611,7 +611,7 @@ This section presents an estimation of the AWS infrastructure costs to run this 
 
 | Service | Unit Price | Usage/Month | Estimated Monthly Cost |
 |---------|-----------|-------------|----------------------|
-| **Amazon Bedrock - Nova Sonic** | $3.00/M input, $12.00/M output | 2,000 sessions (390.1M input + 116.8M output) | ~$2,572 |
+| **Amazon Bedrock - Nova Sonic** | $3.00/M input, $12.00/M output | 2,000 sessions (4.71M input + 2.34M output) | ~$42 |
 | **Amazon Bedrock - Claude Sonnet 4.6** (scoring) | $3.00/M input, $15.00/M output | 2,000 evaluations (7.95M input + 6.82M output) | ~$126 |
 | **Amazon Bedrock - Claude Sonnet 4.6** (screen analysis) | $3.00/M input, $15.00/M output | 2,000 sessions (24.5M input + 1.8M output) | ~$101 |
 | **Bedrock AgentCore Runtime** | $0.0895/vCPU-hr, $0.00945/GB-hr | 2,000 sessions (51.8 vCPU-hrs + 6,300 GB-hrs) | ~$64 |
@@ -624,7 +624,7 @@ This section presents an estimation of the AWS infrastructure costs to run this 
 | **Amazon Cognito** | Free tier up to 50K MAU | 100 MAU | $0 |
 | **Amazon API Gateway v2** | $1.00/M requests | ~100K requests | ~$1 |
 | **Amazon ECR** | $0.10/GB | ~2 GB image | ~$1 |
-| | | **Estimated Total (Web UI)** | **~$3,010/month** |
+| | | **Estimated Total (Web UI)** | **~$480/month** |
 
 ### Per-Session Cost Breakdown
 
@@ -632,12 +632,12 @@ Each training session incurs the following variable costs (measured from a 95-se
 
 | Component | Calculation | Cost per Session |
 |-----------|------------|-----------------|
-| **Nova Sonic** (voice) | 195K input × $3.00/M + 58K output × $12.00/M | ~$1.29 |
+| **Nova Sonic** (voice) | 2.4K input × $3.00/M + 1.2K output × $12.00/M | ~$0.02 |
 | **Claude Sonnet** (scoring) | 4.0K input × $3.00/M + 3.4K output × $15.00/M | ~$0.06 |
 | **Claude Sonnet** (screen analysis) | 12.2K input × $3.00/M + 0.9K output × $15.00/M | ~$0.05 |
 | **AgentCore Runtime** | 0.026 vCPU-hrs × $0.0895 + 3.15 GB-hrs × $0.00945 | ~$0.03 |
 | **Lambda, DynamoDB, S3, API GW** | Per-invocation and storage | ~$0.01 |
-| | **Variable cost per session** | **~$1.43** |
+| | **Variable cost per session** | **~$0.17** |
 
 Fixed monthly infrastructure costs (always-on regardless of session count):
 
@@ -656,13 +656,13 @@ The 2,000 sessions/month estimate above assumes steady-state usage. In practice,
 
 | Component | Cost |
 |-----------|------|
-| Variable costs (700 sessions × $1.43) | ~$1,001 |
+| Variable costs (700 sessions × $0.17) | ~$119 |
 | Fixed infrastructure (1 month) | ~$126 |
-| **Total for training cohort** | **~$1,127** |
-| **Cost per agent** (10 sessions) | **~$16.10** |
-| **Cost per session** | **~$1.61** |
+| **Total for training cohort** | **~$245** |
+| **Cost per agent** (10 sessions) | **~$3.50** |
+| **Cost per session** | **~$0.35** |
 
-If infrastructure is shut down between cohorts (e.g., removing VPC endpoints and NAT Gateway when not in use), fixed costs only apply during active training months. With Connect voice pricing (~$0.09/session for voice service + telephony, replacing $1.29 Nova Sonic + $0.03 AgentCore), the variable cost drops to ~$0.27/session, reducing the cohort total to approximately $315 — or ~$4.50 per agent.
+If infrastructure is shut down between cohorts (e.g., removing VPC endpoints and NAT Gateway when not in use), fixed costs only apply during active training months. Connect voice pricing (~$0.09/session for voice service + telephony) would *replace* Nova Sonic + AgentCore at ~$0.05/session — at the measured token volume this is roughly cost-neutral, so the Connect path should be chosen on the basis of architectural benefits (Contact Lens, unified flows) rather than voice cost savings.
 
 ### Additional Costs for Amazon Connect Mode
 
@@ -683,16 +683,17 @@ If infrastructure is shut down between cohorts (e.g., removing VPC endpoints and
 
 ### Key Cost Drivers
 
-1. **Bedrock Nova Sonic + AgentCore Runtime** (~88% of Web UI cost): Voice streaming ($2,572) and container runtime ($64) are by far the largest cost drivers. Token consumption scales with session duration and conversational complexity. Optimization: shorter practice sessions, session time limits, consider Nova Sonic Lite if available, or migrate to Connect voice pricing to eliminate both costs.
-2. **Bedrock Claude Sonnet** (~8%): Scoring evaluation and screen analysis combined. Scales with evaluation count and transcript length. Optimization: consider Nova Lite for preliminary screening, cache rubric prompts.
-3. **VPC Endpoints** (~3%): Fixed cost regardless of usage. Optimization: evaluate which endpoints are essential; consider using NAT Gateway for low-traffic services instead.
-4. **NAT Gateway** (~1%): Fixed hourly cost plus data processing. Already minimized with VPC endpoints for high-traffic services.
+1. **Bedrock Claude Sonnet** (~47% of Web UI cost): Scoring evaluation ($126) and screen analysis ($101) combined are the largest variable cost driver. Scales with evaluation count, transcript length, and number of screenshots captured per session. Optimization: consider Nova Lite for preliminary screening, cache rubric prompts, reduce screenshot frequency or batch size.
+2. **VPC Endpoints** (~18%): Fixed cost regardless of usage. Optimization: evaluate which endpoints are essential; consider using NAT Gateway for low-traffic services instead.
+3. **Bedrock AgentCore Runtime** (~13%): Container vCPU + memory hours. Scales with concurrent session count and session duration. Optimization: shorter practice sessions, session time limits.
+4. **NAT Gateway** (~7%): Fixed hourly cost plus data processing. Already minimized with VPC endpoints for high-traffic services.
+5. **Bedrock Nova Sonic** (~9%): Voice streaming tokens are now a minor cost at measured usage (~$0.02/session). Migrating to Connect voice pricing no longer yields material savings on voice alone — evaluate Connect based on architectural fit (Contact Lens, unified flows) rather than voice cost.
 
 ### Important Notes
 
 - **Token usage logging** has been added to the prototype. All Bedrock model invocations (Nova Sonic, Claude scoring, screen analysis) log input/output token counts to CloudWatch and include them in the scorecard JSON. This enables precise cost tracking from real usage data.
 - All token counts above are measured from a real training session. Actual usage will vary by scenario length, complexity, and number of screenshots captured.
-- Nova Sonic dominates costs at ~87% of the total. Session duration is the primary cost lever — token consumption scales roughly linearly with call length.
+- Claude Sonnet (scoring + screen analysis) is now the largest variable cost driver at ~47% of the total. Session duration and screenshot count are the primary cost levers — scoring tokens scale with transcript length, and screen analysis scales with number of screenshots.
 - Bedrock allows a maximum of 20 concurrent Nova Sonic connections per AWS account. Each active training session consumes one connection. Request a quota increase if needed.
 - S3 lifecycle policies transition recordings to Glacier after 30 days and delete after 365 days, reducing long-term storage costs.
 - Costs scale roughly linearly with the number of training sessions. At 10x volume (20,000 sessions/month), expect approximately 10x the variable costs with fixed costs (VPC endpoints, NAT Gateway) remaining constant.
@@ -764,7 +765,7 @@ The following items will need to be resolved to build a comprehensive business c
 - **CI/CD Pipeline:** Establish a continuous integration and deployment pipeline to automate testing, building, and deploying changes across all three CDK stacks.
 - **Multi-Region Considerations:** The current deployment targets us-west-2. For production resilience, evaluate multi-region deployment strategies, particularly for the DynamoDB tables (global tables) and S3 buckets (cross-region replication).
 - **Scenario Content Management:** As the scenario library grows, consider implementing version control for scenarios and a review/approval workflow for new content before it becomes available to trainees.
-- **Cost Optimization — Connect Voice Pricing:** The most impactful cost optimization is migrating from direct Bedrock Nova Sonic (token-based pricing) to Amazon Connect's voice service, which bundles Nova Sonic into a flat $0.038/min rate. This reduces voice AI costs by ~94% ($2,572 → $152/month at current volume). Connect supports in-app and web calling — not just telephony — making this viable for the web UI mode. This would also unify the Web UI and Connect architectures and provide Contact Lens analytics for all sessions. The trade-off is replacing the AgentCore/BidiAgent WebSocket pattern with Connect's in-app calling SDK and contact flow framework.
+- **Cost Optimization — Connect Voice Pricing:** With the measured Nova Sonic token volume, direct Bedrock pricing (~$0.02/session) is actually cheaper than Connect's flat $0.038/min voice service (~$0.06/session at 95s). Migrating to Connect voice pricing should therefore be evaluated on architectural merits — unified Web UI/Connect architecture, Contact Lens analytics for all sessions, simpler operations — rather than voice cost savings. Connect supports in-app and web calling (not just telephony), making it viable for web UI mode. The trade-off is replacing the AgentCore/BidiAgent WebSocket pattern with Connect's in-app calling SDK and contact flow framework.
 - **Cost Optimization — General:** Monitor Bedrock model invocation costs closely as usage scales. Evaluate Nova Lite as a lower-cost alternative for scoring. Leverage S3 Intelligent-Tiering for recording storage if access patterns are unpredictable.
 - **Nova Sonic Quota:** Bedrock allows a maximum of 20 concurrent Nova Sonic connections per AWS account. Each active training session -- whether via the Web UI or Amazon Connect -- consumes one connection. Consult with your account team if you need a quota increase.
 - **Amazon Connect Evaluations:** Although we have implemented the Scoring Lambda function to be auto triggered when an Amazon Connect call ends, we recommend that you use Amazon Connect evaluations for rubric scoring. Your account team can help you with enablement. The current Connect implementation fails to associate the outbound call with the inbound call which leads to failure to identify which trainer took the call. One possible solution is to use a pool of outbound phone numbers to allow for this association.

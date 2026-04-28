@@ -88,3 +88,7 @@ scripts/dump_scenarios.py
 scripts/standalone_duo_demo.py
 scripts/standalone_duo_transcript.txt
 scripts/start_chat.py
+
+# Scenarios: only keep sample_* files
+scenarios/*
+!scenarios/sample_*

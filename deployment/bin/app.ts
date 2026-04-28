@@ -20,6 +20,7 @@ const commonTags = {
   Application: 'CallCenterTraining',
   Environment: environment,
   ManagedBy: 'CDK',
+  'auto-delete': 'no',
 };
 
 // Deployment mode: 'agentcore' | 'webui' | 'connect' | 'all'

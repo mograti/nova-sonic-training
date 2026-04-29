@@ -102,7 +102,7 @@ Stack names: `CallCenterTraining-Core`, `CallCenterTraining-Web`, `CallCenterTra
 
 ### Web UI
 
-1. Log in with Cognito credentials (created by admin via `deployment/create-user.sh` or AWS Console)
+1. Log in with Cognito credentials (created by admin via `deployment/create-user.sh --stack-name CallCenterTraining-Web` or AWS Console)
 2. Select a training scenario, customer voice, mood, and language
 3. Start the session — speak naturally via your microphone
 4. End the session when the conversation is complete
@@ -132,13 +132,13 @@ Users without a group default to trainee access.
 ```bash
 # Create a user
 cd deployment
-./create-user.sh user@example.com Password123!
+./create-user.sh user@example.com Password123! --stack-name CallCenterTraining-Web
 
 # Assign to admin group
-./create-user.sh user@example.com Password123! --group admin
+./create-user.sh user@example.com Password123! --stack-name CallCenterTraining-Web --group admin
 
 # Assign to trainee group (explicit)
-./create-user.sh user@example.com Password123! --group trainee
+./create-user.sh user@example.com Password123! --stack-name CallCenterTraining-Web --group trainee
 ```
 
 ## Creating Scenarios

@@ -7,7 +7,7 @@
 #   - all: AgentCore + Web UI + Connect
 #
 # Performance optimizations:
-#   - Single describe-stacks call per stack (batched output parsing via jq)
+#   - Single describe-stacks call per stack (batched output parsing via jq or Python)
 #   - Frontend assets deployed via aws s3 sync + CloudFront invalidation
 #     (avoids a full second cdk deploy per UI stack)
 #   - ts-node --transpile-only skips type checking for fast CDK synthesis
@@ -31,10 +31,73 @@ log_success() { echo -e "${GREEN}✓${NC} $1"; }
 log_warning() { echo -e "${YELLOW}⚠${NC} $1"; }
 log_error() { echo -e "${RED}✗${NC} $1"; }
 
+run_python() {
+    if command -v py >/dev/null 2>&1; then
+        py -3 "$@"
+    elif command -v python3 >/dev/null 2>&1; then
+        python3 "$@"
+    elif command -v python >/dev/null 2>&1; then
+        python "$@"
+    else
+        return 1
+    fi
+}
+
+require_output() {
+    local stack_name="$1"
+    local output_key="$2"
+    local output_value="$3"
+
+    if [ -z "$output_value" ] || [ "$output_value" = "N/A" ] || [ "$output_value" = "null" ] || [ "$output_value" = "None" ]; then
+        log_error "Missing required CloudFormation output '$output_key' from stack '$stack_name'."
+        log_error "Verify the stack exists and completed successfully in account ${ACCOUNT_ID}, region ${REGION}."
+        exit 1
+    fi
+}
+
+require_file() {
+    local file_path="$1"
+
+    if [ ! -s "$file_path" ]; then
+        log_error "Expected file was not written: $file_path"
+        exit 1
+    fi
+}
+
 # Helper: extract a single output value from a describe-stacks JSON blob
 # Usage: get_output "$STACK_JSON" "OutputKey"
 get_output() {
-    echo "$1" | jq -r --arg key "$2" '.Stacks[0].Outputs[] | select(.OutputKey==$key) | .OutputValue // "N/A"'
+    if command -v jq >/dev/null 2>&1; then
+        echo "$1" | jq -r --arg key "$2" '.Stacks[0].Outputs[] | select(.OutputKey==$key) | .OutputValue // "N/A"'
+    else
+        JSON_INPUT="$1" OUTPUT_KEY="$2" run_python - <<'PY'
+import json
+import os
+
+output_key = os.environ["OUTPUT_KEY"]
+data = json.loads(os.environ["JSON_INPUT"])
+
+for output in data.get("Stacks", [{}])[0].get("Outputs", []):
+    if output.get("OutputKey") == output_key:
+        print(output.get("OutputValue") or "N/A")
+        break
+else:
+    print("N/A")
+PY
+    fi
+}
+
+get_account_id() {
+    if command -v jq >/dev/null 2>&1; then
+        echo "$1" | jq -r '.Account'
+    else
+        JSON_INPUT="$1" run_python - <<'PY'
+import json
+import os
+
+print(json.loads(os.environ["JSON_INPUT"]).get("Account", ""))
+PY
+    fi
 }
 
 # Parse CLI arguments
@@ -81,7 +144,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Check prerequisites
-command -v jq >/dev/null 2>&1 || { log_error "jq is required but not installed. Install with: brew install jq"; exit 1; }
+run_python -c "pass" >/dev/null 2>&1 || {
+    if ! command -v jq >/dev/null 2>&1; then
+        log_error "Either jq or Python 3 is required but neither is available on PATH."
+        exit 1
+    fi
+}
 
 # Check if AWS CLI is configured (single API call for both validation and account ID)
 CALLER_IDENTITY=$(aws sts get-caller-identity --output json 2>/dev/null) || {
@@ -89,7 +157,7 @@ CALLER_IDENTITY=$(aws sts get-caller-identity --output json 2>/dev/null) || {
     exit 1
 }
 
-ACCOUNT_ID=$(echo "$CALLER_IDENTITY" | jq -r '.Account')
+ACCOUNT_ID=$(get_account_id "$CALLER_IDENTITY")
 REGION=${AWS_REGION:-${AWS_DEFAULT_REGION:-$(aws configure get region 2>/dev/null || echo "us-east-1")}}
 
 # Interactive menu if no mode specified
@@ -180,6 +248,17 @@ deploy_webui() {
     # Store outputs for results display
     WEBUI_URL=$(get_output "$WEB_OUTPUTS" "CloudFrontUrl")
 
+    require_output "CallCenterTraining-Web" "UserPoolId" "$USER_POOL_ID"
+    require_output "CallCenterTraining-Web" "UserPoolClientId" "$USERPOOL_CLIENT_ID"
+    require_output "CallCenterTraining-Web" "UserPoolDomain" "$USER_POOL_DOMAIN"
+    require_output "CallCenterTraining-Web" "IdentityPoolId" "$IDENTITY_POOL_ID"
+    require_output "CallCenterTraining-Web" "AgentRuntimeArn" "$AGENT_RUNTIME_ARN"
+    require_output "CallCenterTraining-Web" "ApiGatewayUrl" "$API_GATEWAY_URL"
+    require_output "CallCenterTraining-Web" "RecordingsBucketName" "$RECORDINGS_BUCKET"
+    require_output "CallCenterTraining-Web" "FrontendBucketName" "$FRONTEND_BUCKET"
+    require_output "CallCenterTraining-Web" "DistributionId" "$DISTRIBUTION_ID"
+    require_output "CallCenterTraining-Web" "CloudFrontUrl" "$WEBUI_URL"
+
     # Generate frontend env vars
     log_info "[Web UI] Generating environment variables..."
     cat > "$PROJECT_ROOT/frontend/app/.env.production" <<EOF
@@ -193,6 +272,8 @@ VITE_API_URL=$API_GATEWAY_URL
 VITE_RECORDINGS_BUCKET=$RECORDINGS_BUCKET
 EOF
     cp "$PROJECT_ROOT/frontend/app/.env.production" "$PROJECT_ROOT/frontend/app/.env.local"
+    require_file "$PROJECT_ROOT/frontend/app/.env.production"
+    require_file "$PROJECT_ROOT/frontend/app/.env.local"
 
     # Build frontend
     log_info "[Web UI] Building frontend..."
@@ -238,6 +319,14 @@ deploy_connect() {
     # Store outputs for results display
     ADMIN_UI_URL=$(get_output "$CONNECT_OUTPUTS" "AdminUIUrl")
 
+    require_output "CallCenterTraining-Connect" "AdminUserPoolId" "$ADMIN_USER_POOL_ID"
+    require_output "CallCenterTraining-Connect" "AdminUserPoolClientId" "$ADMIN_USER_POOL_CLIENT_ID"
+    require_output "CallCenterTraining-Connect" "ConnectAdminApiUrl" "$CONNECT_API_URL"
+    require_output "CallCenterTraining-Connect" "ConnectInstanceArn" "$CONNECT_INSTANCE_ARN"
+    require_output "CallCenterTraining-Connect" "AdminBucketName" "$ADMIN_BUCKET"
+    require_output "CallCenterTraining-Connect" "AdminDistributionId" "$ADMIN_DIST_ID"
+    require_output "CallCenterTraining-Connect" "AdminUIUrl" "$ADMIN_UI_URL"
+
     # Generate admin UI env vars
     log_info "[Connect] Generating environment variables..."
     cat > "$PROJECT_ROOT/connect-admin/app/.env.production" <<EOF
@@ -248,6 +337,8 @@ VITE_API_URL=$CONNECT_API_URL
 VITE_CONNECT_INSTANCE_ARN=$CONNECT_INSTANCE_ARN
 EOF
     cp "$PROJECT_ROOT/connect-admin/app/.env.production" "$PROJECT_ROOT/connect-admin/app/.env.local"
+    require_file "$PROJECT_ROOT/connect-admin/app/.env.production"
+    require_file "$PROJECT_ROOT/connect-admin/app/.env.local"
 
     # Build admin UI
     log_info "[Connect] Building admin UI..."
@@ -330,6 +421,7 @@ echo ""
 if [ "$DEPLOY_MODE" = "webui" ] || [ "$DEPLOY_MODE" = "all" ]; then
     echo -e "${BLUE}Web UI Stack:${NC}"
     echo "  Frontend URL: $WEBUI_URL"
+    echo "  Create a user: cd deployment && ./create-user.sh <email> <password> --stack-name CallCenterTraining-Web"
     echo ""
 fi
 
@@ -339,7 +431,7 @@ if [ "$DEPLOY_MODE" = "connect" ] || [ "$DEPLOY_MODE" = "all" ]; then
     echo "  Admin UI URL: $ADMIN_UI_URL"
     echo ""
     echo -e "${YELLOW}Next steps for Connect:${NC}"
-    echo "  1. Create an admin user:  cd deployment && ./create-user.sh <email> <password>"
+    echo "  1. Create an admin user:  cd deployment && ./create-user.sh <email> <password> --stack-name CallCenterTraining-Connect"
     echo "  2. Create a Connect agent in the Connect console"
     echo "  3. Open Admin UI: $ADMIN_UI_URL"
     echo ""

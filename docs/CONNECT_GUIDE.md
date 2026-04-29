@@ -303,7 +303,7 @@ Create a user in the **Admin Cognito User Pool** (separate from Connect agent us
 
 ```bash
 cd deployment
-./create-user.sh admin@example.com Password123!
+./create-user.sh admin@example.com Password123! --stack-name CallCenterTraining-Connect
 ```
 
 ---
